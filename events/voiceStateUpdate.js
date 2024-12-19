@@ -64,36 +64,47 @@ module.exports = async (oldState, newState, client, config) => {
         }
     }
 
-    // User leaves a voice channel
-    if (isRoleMatched && oldState.channelId && !newState.channelId) {
-        const channel = oldState.channel;
-        const category = channel.parent;
+// User leaves a voice channel
+if (isRoleMatched && oldState.channelId && !newState.channelId) {
+    const channel = oldState.channel;
+    const category = channel.parent;
 
-        if (config.VC_CATEGORIES.includes(category.id)) {
-            const leaveTime = new Date();
+    if (config.VC_CATEGORIES.includes(category.id)) {
+        const leaveTime = new Date();
 
-            const userMessage = activeMessages.get(member.id);
-            if (userMessage && userMessage.date === currentDate) {
-                const { message, attendances, webhook } = userMessage;
+        const userMessage = activeMessages.get(member.id);
+        if (userMessage && userMessage.date === currentDate) {
+            const { message, attendances, webhook } = userMessage;
 
-                // Add disconnect time to the last attendance
-                const lastAttendance = attendances[attendances.length - 1];
-                lastAttendance.leaveTime = leaveTime;
+            // Add disconnect time to the last attendance
+            const lastAttendance = attendances[attendances.length - 1];
+            lastAttendance.leaveTime = leaveTime;
 
-                // Calculate total time for this attendance
-                const totalTimeMs = leaveTime - lastAttendance.joinTime;
-                const totalTimeMinutes = Math.floor(totalTimeMs / 60000); // Total minutes
-                const totalTimeSeconds = Math.floor((totalTimeMs % 60000) / 1000); // Remaining seconds
-                lastAttendance.totalTime = `${totalTimeMinutes}m ${totalTimeSeconds}s`;
+            // Calculate total time for this attendance
+            const totalTimeMs = leaveTime - lastAttendance.joinTime;
+            const totalTimeMinutes = Math.floor(totalTimeMs / 60000); // Total minutes
+            const totalTimeSeconds = Math.floor((totalTimeMs % 60000) / 1000); // Remaining seconds
+            lastAttendance.totalTime = `${totalTimeMinutes}m ${totalTimeSeconds}s`;
 
-                // Update the message with the day's total time
-                const updatedContent = generateAttendanceMessage(member, attendances, true);
+            // Update the message with the day's total time
+            const updatedContent = generateAttendanceMessage(member, attendances, true);
+
+            try {
                 await webhook.editMessage(message.id, { content: updatedContent });
-
                 userMessage.attendances = attendances; // Update tracked data
+            } catch (error) {
+                if (error.code === 10008) {
+                    console.error(`Message not found (possibly deleted): ${message.id}`);
+                    // Optionally, remove the user from activeMessages map
+                    activeMessages.delete(member.id);
+                } else {
+                    console.error(`Failed to edit message: ${error.message}`);
+                }
             }
         }
     }
+}
+
 };
 
 // Helper function to generate attendance message content
