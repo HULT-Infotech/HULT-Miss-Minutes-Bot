@@ -16,6 +16,9 @@ module.exports = async (oldState, newState, client, config) => {
         return;
     }
 
+    // Fetch or create the webhook
+    const webhook = await getOrCreateWebhook(targetChannel, client);
+
     // User joins a voice channel
     if (isRoleMatched && newState.channelId && !oldState.channelId) {
         const channel = newState.channel;
@@ -24,18 +27,27 @@ module.exports = async (oldState, newState, client, config) => {
         if (config.VC_CATEGORIES.includes(category.id)) {
             const joinTime = new Date();
 
-            const message = await targetChannel.send(
-                `**Attendance Recorded**\n` +
-                `**User:** ${member.user.username}\n` +
-                `**Channel:** ${channel.name}\n` +
-                `**Category:** ${category.name}\n` +
-                `**Joined At:** ${joinTime.toLocaleString()}\n` +
-                `**Disconnected At:** Not yet\n` +
-                `**Total Time:** Not yet`
-            );
+            const message = await webhook.send({
+                content: "```" +
+                    "User: " +
+                    member.user.username +
+                    "\n\n" +
+                    "Joined At: " +
+                    joinTime.toLocaleString() +
+                    "\n\n" +
+                    "Voice Channel: " +
+                    channel.name +
+                    "\nCategory: " +
+                    category.name +
+                    "\n\n" +
+                    "Disconnected At: Not yet" +
+                    "\nTotal Time: Not yet" +
+                    "```",
+                username: client.user.username,
+                avatarURL: client.user.displayAvatarURL(),
+            });
 
-            // Save the message ID for later editing
-            activeMessages.set(member.id, { message, joinTime });
+            activeMessages.set(member.id, { message, joinTime, webhook });
         }
     }
 
@@ -47,31 +59,52 @@ module.exports = async (oldState, newState, client, config) => {
         if (config.VC_CATEGORIES.includes(category.id)) {
             const leaveTime = new Date();
 
-            // Retrieve the message for this user
             const userMessage = activeMessages.get(member.id);
             if (userMessage) {
-                const { message, joinTime } = userMessage;
+                const { message, joinTime, webhook } = userMessage;
 
-                // Calculate total time
                 const totalTimeMs = leaveTime - joinTime;
                 const totalTimeMinutes = Math.floor(totalTimeMs / 60000); // Total minutes
                 const totalTimeSeconds = Math.floor((totalTimeMs % 60000) / 1000); // Remaining seconds
                 const totalTimeFormatted = `${totalTimeMinutes}m ${totalTimeSeconds}s`;
 
-                // Edit the message to include disconnect time and total time
-                await message.edit(
-                    `**Attendance Recorded**\n` +
-                    `**User:** ${member.user.username}\n` +
-                    `**Channel:** ${channel.name}\n` +
-                    `**Category:** ${category.name}\n` +
-                    `**Joined At:** ${joinTime.toLocaleString()}\n` +
-                    `**Disconnected At:** ${leaveTime.toLocaleString()}\n` +
-                    `**Total Time:** ${totalTimeFormatted}`
-                );
+                await webhook.editMessage(message.id, {
+                    content: "```" +
+                        "User: " +
+                        member.user.username +
+                        "\n\n" +
+                        "Joined At: " +
+                        joinTime.toLocaleString() +
+                        "\n\n" +
+                        "Voice Channel: " +
+                        channel.name +
+                        "\nCategory: " +
+                        category.name +
+                        "\n\n" +
+                        "Disconnected At: " +
+                        leaveTime.toLocaleString() +
+                        "\nTotal Time: " +
+                        totalTimeFormatted +
+                        "```",
+                });
 
-                // Remove the user from the active messages map
                 activeMessages.delete(member.id);
             }
         }
     }
 };
+
+// Helper function to get or create a webhook
+async function getOrCreateWebhook(channel, client) {
+    const webhooks = await channel.fetchWebhooks();
+    let webhook = webhooks.find((wh) => wh.owner.id === client.user.id);
+
+    if (!webhook) {
+        webhook = await channel.createWebhook({
+            name: client.user.username,
+            avatar: client.user.displayAvatarURL(),
+        });
+    }
+
+    return webhook;
+}
