@@ -19,6 +19,8 @@ module.exports = async (oldState, newState, client, config) => {
     // Fetch or create the webhook
     const webhook = await getOrCreateWebhook(targetChannel, client);
 
+    const currentDate = new Date().toDateString(); // Track attendance by date
+
     // User joins a voice channel
     if (isRoleMatched && newState.channelId && !oldState.channelId) {
         const channel = newState.channel;
@@ -27,27 +29,38 @@ module.exports = async (oldState, newState, client, config) => {
         if (config.VC_CATEGORIES.includes(category.id)) {
             const joinTime = new Date();
 
-            const message = await webhook.send({
-                content: "```" +
-                    "User: " +
-                    member.user.username +
-                    "\n\n" +
-                    "Joined At: " +
-                    joinTime.toLocaleString() +
-                    "\n\n" +
-                    "Voice Channel: " +
-                    channel.name +
-                    "\nCategory: " +
-                    category.name +
-                    "\n\n" +
-                    "Disconnected At: Not yet" +
-                    "\nTotal Time: Not yet" +
-                    "```",
-                username: client.user.username,
-                avatarURL: client.user.displayAvatarURL(),
-            });
+            // Check if the user already has an active attendance message for today
+            let userMessage = activeMessages.get(member.id);
 
-            activeMessages.set(member.id, { message, joinTime, webhook });
+            if (userMessage && userMessage.date === currentDate) {
+                // Edit the existing message to include the new join
+                const { message, attendances, webhook } = userMessage;
+                attendances.push({
+                    joinTime: joinTime,
+                    channel: channel.name,
+                    category: category.name,
+                });
+
+                const updatedContent = generateAttendanceMessage(member, attendances);
+                await webhook.editMessage(message.id, { content: updatedContent });
+
+                userMessage.attendances = attendances; // Update tracked data
+            } else {
+                // Create a new message for the user if it's a new day
+                const attendances = [{
+                    joinTime: joinTime,
+                    channel: channel.name,
+                    category: category.name,
+                }];
+
+                const message = await webhook.send({
+                    content: generateAttendanceMessage(member, attendances),
+                    username: client.user.username,
+                    avatarURL: client.user.displayAvatarURL(),
+                });
+
+                activeMessages.set(member.id, { message, attendances, date: currentDate, webhook });
+            }
         }
     }
 
@@ -60,39 +73,69 @@ module.exports = async (oldState, newState, client, config) => {
             const leaveTime = new Date();
 
             const userMessage = activeMessages.get(member.id);
-            if (userMessage) {
-                const { message, joinTime, webhook } = userMessage;
+            if (userMessage && userMessage.date === currentDate) {
+                const { message, attendances, webhook } = userMessage;
 
-                const totalTimeMs = leaveTime - joinTime;
+                // Add disconnect time to the last attendance
+                const lastAttendance = attendances[attendances.length - 1];
+                lastAttendance.leaveTime = leaveTime;
+
+                // Calculate total time for this attendance
+                const totalTimeMs = leaveTime - lastAttendance.joinTime;
                 const totalTimeMinutes = Math.floor(totalTimeMs / 60000); // Total minutes
                 const totalTimeSeconds = Math.floor((totalTimeMs % 60000) / 1000); // Remaining seconds
-                const totalTimeFormatted = `${totalTimeMinutes}m ${totalTimeSeconds}s`;
+                lastAttendance.totalTime = `${totalTimeMinutes}m ${totalTimeSeconds}s`;
 
-                await webhook.editMessage(message.id, {
-                    content: "```" +
-                        "User: " +
-                        member.user.username +
-                        "\n\n" +
-                        "Joined At: " +
-                        joinTime.toLocaleString() +
-                        "\n\n" +
-                        "Voice Channel: " +
-                        channel.name +
-                        "\nCategory: " +
-                        category.name +
-                        "\n\n" +
-                        "Disconnected At: " +
-                        leaveTime.toLocaleString() +
-                        "\nTotal Time: " +
-                        totalTimeFormatted +
-                        "```",
-                });
+                // Update the message with the day's total time
+                const updatedContent = generateAttendanceMessage(member, attendances, true);
+                await webhook.editMessage(message.id, { content: updatedContent });
 
-                activeMessages.delete(member.id);
+                userMessage.attendances = attendances; // Update tracked data
             }
         }
     }
 };
+
+// Helper function to generate attendance message content
+function generateAttendanceMessage(member, attendances, includeTotalTime = false) {
+    let content = "```" +
+        "User: @" + member.user.username + "\n\n";
+
+    let totalDayTimeMs = 0;
+
+    attendances.forEach((attendance, index) => {
+        content += `Session ${index + 1}:\n`;
+        content += "Joined At: " + attendance.joinTime.toLocaleString() + "\n";
+        content += "Voice Channel: " + attendance.channel + "\n";
+        content += "Category: " + attendance.category + "\n";
+
+        if (attendance.leaveTime) {
+            const totalTimeMs = attendance.leaveTime - attendance.joinTime;
+            totalDayTimeMs += totalTimeMs; // Add to total day time
+
+            content += "Disconnected At: " + attendance.leaveTime.toLocaleString() + "\n";
+            content += "Total Time: " + attendance.totalTime + "\n";
+        } else {
+            content += "Disconnected At: Not yet\n";
+            content += "Total Time: Not yet\n";
+        }
+
+        content += "\n";
+    });
+
+    if (includeTotalTime) {
+        const totalDayMinutes = Math.floor(totalDayTimeMs / 60000); // Total minutes
+        const totalDaySeconds = Math.floor((totalDayTimeMs % 60000) / 1000); // Remaining seconds
+        const totalDayFormatted = `${totalDayMinutes}m ${totalDaySeconds}s`;
+
+        content += "-----------------------------------\n";
+        content += "Total Work Time for the Day: " + totalDayFormatted + "\n";
+    }
+
+    content += "```";
+    content += `<@${member.id}> \t✅`; // Use nickname at the bottom
+    return content;
+}
 
 // Helper function to get or create a webhook
 async function getOrCreateWebhook(channel, client) {
