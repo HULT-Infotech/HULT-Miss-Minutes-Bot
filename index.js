@@ -13,10 +13,15 @@ const client = new Client({
         GatewayIntentBits.GuildVoiceStates,
     ],
 });
+client.once('ready', () => {  
+    console.log(`Logged in as ${client.user.tag}!`);  
 
-client.once('ready', () => {
-    console.log(`Logged in as ${client.user.tag}!`);
-});
+    // Set the bot status to show it's watching the employees
+    client.user.setPresence({
+        activities: [{ name: 'the employees', type: 3 }], // 3 corresponds to "Watching"
+        status: 'online',
+    });
+}); 
 
 const handleVoiceStateUpdate = require('./events/voiceStateUpdate');
 client.on('voiceStateUpdate', (oldState, newState) => {
