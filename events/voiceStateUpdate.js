@@ -1,5 +1,3 @@
-const Attendance = require('../models/Attendance');
-
 module.exports = async (oldState, newState, client, config) => {
     const guild = client.guilds.cache.get(config.GUILD_ID);
     if (!guild) return;
@@ -16,20 +14,18 @@ module.exports = async (oldState, newState, client, config) => {
         const category = channel.parent;
 
         if (config.VC_CATEGORIES.includes(category.id)) {
-            const attendance = new Attendance({
-                userId: member.id,
-                username: member.user.username,
-                channelId: channel.id,
-                channelName: channel.name,
-                joinTime: new Date(),
-                categoryId: category.id,
-            });
+            const targetChannel = client.channels.cache.get('1319201207880908830'); // Replace with your target text channel ID
 
-            try {
-                await attendance.save();
-                console.log(`Attendance recorded for ${member.user.username}`);
-            } catch (err) {
-                console.error('Error saving attendance:', err);
+            if (targetChannel) {
+                targetChannel.send(
+                    `**Attendance Recorded**\n` +
+                    `**User:** ${member.user.username}\n` +
+                    `**Channel:** ${channel.name}\n` +
+                    `**Category:** ${category.name}\n` +
+                    `**Joined At:** ${new Date().toLocaleString()}`
+                );
+            } else {
+                console.error('Target channel not found!');
             }
         }
     }
